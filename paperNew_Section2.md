@@ -69,6 +69,19 @@ After running 10 folds of cross-validation (cv), below is the cv AUC on 90\% dat
 
 
 The AUC ROC for classifiers using *only T1w features* is: 
+
+```
+        AUC        std group     classifier
+1 0.7984671 0.04996057    cv      radialSVM
+2 0.7664474 0.00000000  test      radialSVM
+3 0.7963950 0.06003491    cv   RandomForest
+4 0.7576754 0.00000000  test   RandomForest
+5 0.7932280 0.04028831    cv      ObliqueRF
+6 0.7982456 0.00000000  test      ObliqueRF
+7 0.7981366 0.05497980    cv adaboost_trees
+8 0.7719298 0.00000000  test adaboost_trees
+```
+
 ![](paperNew_Section2_files/figure-html/unnamed-chunk-4-1.png)<!-- -->
 
 
@@ -95,25 +108,20 @@ The following algorithm is used to boost ensembles of classification trees:
 
 After running 10 folds of cross-validation (cv), below is the AUC distributions achieved on held-out test sets:
 
--------------------------------------------------
- Min.   1st Qu.   Median   Mean   3rd Qu.   Max. 
------- --------- -------- ------ --------- ------
-0.7976  0.8083    0.8167  0.8239  0.8243   0.8879
--------------------------------------------------
+```
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+ 0.7976  0.8083  0.8167  0.8239  0.8243  0.8879 
+```
 
+```
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+ 0.5662  0.6399  0.6528  0.6752  0.7173  0.7927 
+```
 
--------------------------------------------------
- Min.   1st Qu.   Median   Mean   3rd Qu.   Max. 
------- --------- -------- ------ --------- ------
-0.5662  0.6399    0.6528  0.6752  0.7173   0.7927
--------------------------------------------------
-
-
--------------------------------------------------
- Min.   1st Qu.   Median   Mean   3rd Qu.   Max. 
------- --------- -------- ------ --------- ------
-0.8032  0.8268    0.8543  0.8533  0.8683   0.9253
--------------------------------------------------
+```
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+ 0.8032  0.8268  0.8543  0.8533  0.8683  0.9253 
+```
 
 ![](paperNew_Section2_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
 
@@ -174,11 +182,10 @@ but not others. This has been previously documented in the literature, but this 
 BIRADS T2w SI category in our datasets was reported among 315 cases, while not reported in 312:
 
 
------------------------------------------------------------------------
- Hyperintense   Hypointense or not seen   None   Slightly hyperintense 
--------------- ------------------------- ------ -----------------------
-      98                  152             312             65           
------------------------------------------------------------------------
+```
+           Hyperintense Hypointense or not seen                    None   Slightly hyperintense 
+                     98                     152                     312                      65 
+```
 
 **ROC for Lesions with reported BIRADS T2wSI:**
 

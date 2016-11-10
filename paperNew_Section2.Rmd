@@ -214,7 +214,7 @@ plot_train_tune_Models <- function(outputs, testx, testy, title){
   
   # append all 5 classifier resutls
   res_outputs = rbind(res_rbfsvm, res_rf, res_ORF, res_ada_btrees)
-  pander(res_outputs)
+  print(res_outputs)
   
   # bar plot
   p <- ggplot(data=res_outputs, aes(x=classifier, y=AUC, fill=group, group=group)) +
@@ -267,9 +267,9 @@ After running 10 folds of cross-validation (cv), below is the AUC distributions 
 ```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
 load("Z:/Cristina/Section2/finalTreebased-boosting/Outputs/summaryResults.RData")
 
-pander(summary(allcvauc_imgT1))
-pander(summary(allcvauc_imgT2))
-pander(summary(allcvauc_T1T2))
+print(summary(allcvauc_imgT1))
+print(summary(allcvauc_imgT2))
+print(summary(allcvauc_T1T2))
 
 # boxplots of cv-performances
 cvperfs = data.frame()
@@ -335,7 +335,7 @@ BIRADS T2w SI category in our datasets was reported among 315 cases, while not r
 ```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
 load("Z:/Cristina/Section2/finalTreebased-boosting/Outputs/Analysisbygroups.RData")
 
-pander(summary(factor(perfall_T1T2_wT2rep$find_t2_signal_int)))
+print(summary(factor(perfall_T1T2_wT2rep$find_t2_signal_int)))
 
 
 ```
