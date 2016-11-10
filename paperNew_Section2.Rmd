@@ -1,0 +1,471 @@
+---
+title: "Notes new paper"
+output:
+  html_document:
+    fig_caption: yes
+    fig_height: 5
+    fig_width: 6
+    highlight: pygments
+    keep_md: yes
+    toc: yes
+---
+
+```{r set-options, echo=FALSE, cache=FALSE, message = FALSE, warning=FALSE}
+knitr::opts_chunk$set(root.dir="Z:/Cristina/Section2/finalTreebased-boosting",
+                      echo = TRUE, verbose = FALSE, 
+                      warning=FALSE, message=FALSE, comment="", tidy = TRUE)
+
+options(width = 100)
+setwd("Z:/Cristina/Section2/finalTreebased-boosting")
+library(R.utils)
+library(caret)
+require(ggplot2)
+library("RSQLite")
+library(pROC)
+library("Boruta")
+require(data.table)
+library(rpart)
+library(rpart.plot)
+library(R.utils)
+library(pander)
+library(adabag)
+library(grDevices)
+
+source('Functions.R')
+source('FunctionsModels.R')
+
+```
+
+# Incorporating T2w breast MRI in CADx of breast lesions:
+
+## Rationale
+* While T1w CE-MRI plays a central role in breast MRI, T2w imaging is routinely used by radiologists to rule out the presence of cysts, intra mammary lymph nodes and other benign findings (Kuhl et al., 1999; Moran et al., 2014), yet T2w-derived lesion features have been scarcely used in CAD. 
+* Baltzer et al. (2011) showed that in the presence of dilated ducts and cysts, the signal intensity on T2w images differed significantly between cancers and non-cancers. Ballesio et al. (2009) proposed to use the lesion to muscle
+signal intensity ratio (LMSIR) as an adjunt lesion feature to the standard MRI interpreting criteria, and showed that LMSIR measurement improved the differential diagnosis of borderline BIRADS 3 and 4 lesions. 
+* In addition, T2w morphology and texture could act as additional differentiating criteria for benign lesions such as fibroadenomas that can exhibit similar constrast agent enhancement as malignant lesions (Baltzer et al. (2011))
+
+## Aim
+To investigate whether we can obtain an increase in discrimination ability for the classification task of cancerous and non-cancerous lesions using T2w imaging derived features in addition to more conventional T1w CE-MRI based-features
+
+
+## Materials:
+### Breast MRI datasets
+* 627 breast MRI lesions
+* in 435 women aged 48.75 $\pm$ 10.6 years (mean $\pm$ std)
+* breakdown by enhancement type and ground truth pathology:
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+sqlite <- dbDriver("SQLite")
+conn <- dbConnect(sqlite, "Z:/Cristina/Section2/finalTreebased-boosting/textureUpdatedFeatures.db")
+
+# 2) all T1W features
+lesionsQuery <- dbGetQuery(conn, "SELECT *
+                           FROM  lesion 
+                           INNER JOIN f_dynamic ON (lesion.lesion_id = f_dynamic.lesion_id)
+                           INNER JOIN f_morphology ON (lesion.lesion_id = f_morphology.lesion_id)
+                           INNER JOIN f_texture ON (lesion.lesion_id = f_texture.lesion_id)
+                           INNER JOIN stage1features ON (lesion.lesion_id = stage1features.lesion_id)
+                           INNER JOIN f_T2 ON (lesion.lesion_id = f_T2.lesion_id)
+                           INNER JOIN radiologyInfo ON (lesion.lesion_id = radiologyInfo.lesion_id)")
+
+# prune entries and extract feature subsets
+# corresponds to 5 entries lesion info, 34 dynamic, 19 morpho, 34 texture fueatures
+lesioninfo = lesionsQuery[c(1:26)]
+dynfeatures = lesionsQuery[c(29:62)]
+morphofeatures = lesionsQuery[c(65:83)]
+texfeatures = lesionsQuery[c(86:129)]
+T2info = lesionsQuery[c(259:270)]
+T2features = lesionsQuery[c(259,267:291,232:251)]
+stage1features = lesionsQuery[c(132:231)]
+imagingdetails = lesionsQuery[c(293:318)]
+
+##### set data splits
+# combine all features and exclude foci lesions at this point
+namest1w = names(cbind(dynfeatures, morphofeatures, texfeatures, stage1features))
+namest2w = names(T2features)
+
+# all lesions at the lesion id
+allfeatures = cbind(lesioninfo[c("lesion_label")], dynfeatures, morphofeatures, texfeatures, stage1features, T2features)   
+# select non foci
+lesioninfo = subset(lesioninfo, lesion_label != "fociB" & lesion_label != "fociM" )
+
+allfeatures = allfeatures[rownames(lesioninfo),]
+allfeatures$origlesion_label = factor(allfeatures$lesion_label)
+
+patientage = data.frame()
+for (k in 1:length(lesioninfo$lesion_id)) {
+    # find the age of patient at the time of imaging
+    days = difftime(lesioninfo$exam_dt_datetime[k], lesioninfo$anony_dob_datetime[k], 
+        units = "days")
+    age = days[[1]]/365
+    patientage = rbind(patientage, c(age))
+}
+
+# combine with other data
+patientinfo = cbind(lesioninfo$cad_pt_no_txt, patientage, lesioninfo$lesion_label, lesioninfo$BIRADS)
+colnames(patientinfo) <- c("CADid", "age", "type", "BIRADS")
+
+```
+
+```{r}
+summary(allfeatures$origlesion_label)
+```
+* Distribution of lesion enhancement type by radiologist BIRADS assessment category
+```{r warning=FALSE, message=FALSE}
+bartypes <- ggplot(patientinfo, aes(type, fill = BIRADS))
+bartypes + geom_bar() + labs(x = "type of lesion", y = "# patients", title = "Type of lesion and BIRADS category")
+```
+
+
+## Experiment 1: Comparing Ensemble of trees with other models (not for paper)
+How does the type of classifier affect the generalization error ?
+
+Compare differences in cross-validation and generalization performance among 4 types of predictive classifiers:
+
+1. **SVM** (radial bases - based on Levman. et al IEEE paper))
+
+2. **Random Forest** (standard bootstrap aggregation of binary decision trees in ensembles, as originally proposed)
+
+3. **Oblique Random Forest** (allowing higher order feature interactions during node splits)
+
+4. **Ensembles of boosting classification trees** (binary decision trees - build ensembles by error weight estimation instead of majority voting)
+
+
+**Cross validation AUC (cv):**
+
+AUC measured in the Training set during grid parameter tunning. For each classifier, parameters are tunned acording to a grid search using the following algorithm:
+
+![](Z:/Cristina/Section2/papernew_notes/images/TrainAlgo.png)
+
+
+**Generalizaton AUC (test): **
+
+AUC measured in the Test set, after parameter tunning, using best set of parameters in final model 
+
+After running 10 folds of cross-validation (cv), below is the cv AUC on 90\% datasets (used for training and parameter tunning) and the remaining 10\% held-out datasets for independent testing.
+
+
+The AUC ROC for classifiers using *only T1w features* is: 
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+load("Z:/Cristina/Section2/othermodels/results/comparisons_Models_trained_onlyT1w.RData")
+
+plot_train_tune_Models <- function(outputs, testx, testy, title){
+  ########## plot comparison
+  # resample linearSVM
+  outputs$RBFsigma$resample = na.omit(outputs$RBFsigma$resample)
+  res_rbfsvm = data.frame(AUC = mean(outputs$RBFsigma$resample$ROC),
+                          std = sd(outputs$RBFsigma$resample$ROC),
+                          group = "cv",
+                          classifier="radialSVM")
+  #append test resulst
+  proby_svmradial_test = predict(outputs$RBFsigma, newdata=testX, type="prob")
+  ROCF_radial <- roc(testy, proby_svmradial_test$C, plot=FALSE)
+  res_rbfsvm = rbind(res_rbfsvm, 
+                     data.frame(AUC = ROCF_radial$auc,
+                                std = 0,
+                                group = "test",
+                                classifier="radialSVM"))
+  ############
+  # resample RF
+  outputs$rf$resample = na.omit(outputs$rf$resample)
+  res_rf = data.frame(AUC = mean(outputs$rf$resample$ROC),
+                      std = sd(outputs$rf$resample$ROC),
+                      group = "cv",
+                      classifier="RandomForest")
+  #append test resulst
+  proby_rf_test = predict(outputs$rf, newdata=testX, type="prob")
+  ROCF_rf <- roc(testy, proby_rf_test$C, plot=FALSE)
+  res_rf = rbind(res_rf, 
+                 data.frame(AUC = ROCF_rf$auc,
+                            std = 0,
+                            group = "test",
+                            classifier="RandomForest"))
+  ############
+  # resample ORF
+  outputs$ORF$resample = na.omit(outputs$ORF$resample)
+  res_ORF = data.frame(AUC = mean(outputs$ORF$resample$ROC),
+                       std = sd(outputs$ORF$resample$ROC),
+                       group = "cv",
+                       classifier="ObliqueRF")
+  #append test resulst
+  proby_ORF_test = predict(outputs$ORF, newdata=testX, type="prob")
+  ROCF_ORF <- roc(testy, proby_ORF_test$C, plot=FALSE)
+  res_ORF = rbind(res_ORF, 
+                  data.frame(AUC = ROCF_ORF$auc,
+                             std = 0,
+                             group = "test",
+                             classifier="ObliqueRF"))
+  
+  ############
+  # resample ada_btrees
+  outputs$ada_btrees$resample = na.omit(outputs$ada_btrees$resample)
+  res_ada_btrees = data.frame(AUC = mean(outputs$ada_btrees$resample$ROC),
+                              std = sd(outputs$ada_btrees$resample$ROC),
+                              group = "cv",
+                              classifier="adaboost_trees")
+  #append test resulst
+  proby_ada_btrees_test = predict(outputs$ada_btrees, newdata=testX, type="prob")
+  ROCF_ada_btrees <- roc(testy, proby_ada_btrees_test$C, plot=FALSE)
+  res_ada_btrees = rbind(res_ada_btrees, 
+                         data.frame(AUC = ROCF_ada_btrees$auc,
+                                    std = 0,
+                                    group = "test",
+                                    classifier="adaboost_trees"))
+  
+  
+  # append all 5 classifier resutls
+  res_outputs = rbind(res_rbfsvm, res_rf, res_ORF, res_ada_btrees)
+  pander(res_outputs)
+  
+  # bar plot
+  p <- ggplot(data=res_outputs, aes(x=classifier, y=AUC, fill=group, group=group)) +
+    geom_bar(stat="identity",color="black", position=position_dodge()) +
+    geom_errorbar(aes(ymin=AUC-std, ymax=AUC+std), width=.2, position=position_dodge(0.9)) +
+    geom_text(data=data.frame(res_outputs), 
+              aes(label=formatC(AUC,digits=2, format="f")),
+              position=position_dodge(0.9), vjust=1.5,
+              size=4)
+  
+  # Finished bar plot
+  print(p + labs(title=paste0("Comparison Models ",title)) +
+          scale_y_continuous(limits = c(0, 1), breaks=0:10/10))
+  
+  return(res_outputs)
+}
+
+results_onlyT1w = plot_train_tune_Models(regular_T1w, testx, testy,                                                                                 title="| T1w features only")
+
+```
+
+
+The AUC ROC for classifiers using *T2w in addition to T1w features* is: 
+
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+load("Z:/Cristina/Section2/othermodels/results/comparisons_Models_trained_T1wT2w.RData")
+
+results_T1wT2w = plot_train_tune_Models(regular_T1wT2w, testx, testy,                                                                                 title="| T1w plus T2w features")
+
+```
+
+cv AUC for all classifiers is comparable, but SVMs and ensembles of boosting classification trees exhibit higher generalization performance tahn bagging ensembles of classification trees. 
+
+## Experiment 2: Boosting ensembles of trees with additional T2w features 
+* The premise of Ensembles learning is simple: The goal is to improve the accuracy of any classifier by combining single classifiers  which are slightly better than random guessing into a "committee". Every single trained classifier has limitations and on its own will produce classification errors, but the decision of the "committee" has better overall accuracy on average, than any individual classifier
+
+* In Boosting (Frend & Schapire 1996) the idea is to build individual classifiers that exhibit "diversity" by explicitly altering the distribution of training examples. Adaboost trains models sequentially and identifies miss-classified cases so that their emphasis is increased to correctly classify them in subsequent rounds.
+ 
+* **Intuition:** Any weak classifier can be boosted into an arbitrarily accurate one. In principle, a decision tree algorithm, can grow each branch of the tree deeply enough to perfectly classify the training examples, but in noisy data or in small training sets this practice is prone to overfitting.
+
+The following algorithm is used to boost ensembles of classification trees:
+
+![](Z:/Cristina/Section2/papernew_notes/images/boosting.png)
+
+* Parameters such as **maximum depth** of binary decision trees, and the **number of boosting trees** in the ensemble can be tunned. The combination of parameters that produced the ensemble with lowest classification error was chosen as the final classifer, and its unbiased performance assessed in held-out cases using 10 folds of cv.
+
+
+
+After running 10 folds of cross-validation (cv), below is the AUC distributions achieved on held-out test sets:
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+load("Z:/Cristina/Section2/finalTreebased-boosting/Outputs/summaryResults.RData")
+
+pander(summary(allcvauc_imgT1))
+pander(summary(allcvauc_imgT2))
+pander(summary(allcvauc_T1T2))
+
+# boxplots of cv-performances
+cvperfs = data.frame()
+cvperfs = rbind(cvperfs, data.frame(cvAUC=allcvauc_imgT1, group="onlyT1w"))
+cvperfs = rbind(cvperfs, data.frame(cvAUC=allcvauc_imgT2, group="onlyT2w"))
+cvperfs = rbind(cvperfs, data.frame(cvAUC=allcvauc_T1T2, group="T1w+T2w combined"))
+# find min
+minAUC = min(cvperfs$cvAUC)
+
+# plot
+p <- ggplot(cvperfs, aes(factor(group), cvAUC))
+p + geom_boxplot(aes(fill = factor(group)))
+
+```
+
+### Performance of combined T1w+T2w vs. only T1w classifiers
+#### in all lesions (pooled data across cv-folds and plot pooled results)
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+par(mfrow=c(1,1))
+n=15
+colors = rainbow(n, s = 1, v = 1, start = 0, end = max(1, n - 1)/n, alpha = 1)
+
+print("Results for T1w-only features classifier:")
+# plot 1/4
+p1all = calcAUC_plot(perfall_imgT1$obs, perfall_imgT1$C, 
+                           xptext=0.45, yptext=0.75 , 1, colors[1], atitle="")
+par(new=TRUE)
+
+print("Results for T1w+T2w features classifier:")
+p2all = calcAUC_plot(perfall_T1T2$obs, perfall_T1T2$C,
+                           xptext=0.65, yptext=0.55, 2, colors[12], 
+                  atitle="ROCs pooled heldout-patient across ALL folds")
+
+legend("bottomright", 
+       legend = c(paste0("imgT1w"),
+                  paste0("T1w+T2w")),
+       col = c(colors[1],colors[12]), lty=c(1,2), lwd = 2)
+
+```
+
+**Significance t-test:**
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+# find significance
+roc.test(p1all$ROC, p2all$ROC, method=c("bootstrap"), alternative = c("less"), boot.stratified=TRUE)
+
+```
+
+#### In lesions with reported BIRADS T2w Signal intensity categories
+
+The BIRADS lexicon defines lesion signal intensity in T2w imaging as follows:
+
+ * **Hypointense or not seen**
+ 
+ * **Slightly Hyperintense**
+ 
+ * **Hyperintense**
+
+In clinical practice, however, BIRADS T2w Signal intensity categories is **not reported** by the radiologist, suggesting that the evaluation of T2w imaging is relevant in the differential diagnosis of certain lesions
+but not others. This has been previously documented in the literature, but this expert knowledge has not been incorporated in CADx. 
+
+BIRADS T2w SI category in our datasets was reported among 315 cases, while not reported in 312:
+
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+load("Z:/Cristina/Section2/finalTreebased-boosting/Outputs/Analysisbygroups.RData")
+
+pander(summary(factor(perfall_T1T2_wT2rep$find_t2_signal_int)))
+
+
+```
+
+**ROC for Lesions with reported BIRADS T2wSI:**
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+# when only T1w
+T2wrep_imgT1_wT2rep = subset(perfall_imgT1_wT2rep, find_t2_signal_int=="Hyperintense" | 
+                                                  find_t2_signal_int=="Slightly hyperintense" |
+                                                  find_t2_signal_int=="Hypointense or not seen")
+NoneT2w_imgT1_wT2rep =subset(perfall_imgT1_wT2rep, find_t2_signal_int=="None")
+
+# when  T1w + T2w
+T2wrep_T1T2_wT2rep = subset(perfall_T1T2_wT2rep, find_t2_signal_int=="Hyperintense" | 
+                                                  find_t2_signal_int=="Slightly hyperintense" |
+                                                  find_t2_signal_int=="Hypointense or not seen")
+NoneT2w_T1T2_wT2rep =subset(perfall_T1T2_wT2rep, find_t2_signal_int=="None" )
+
+########### 
+par(mfrow=c(1,1))
+print("Results for T1w-only features classifier:")
+p1BIRADS = calcAUC_plot(T2wrep_imgT1_wT2rep$obs, T2wrep_imgT1_wT2rep$C, 
+                           xptext=0.45, yptext=0.75 , 1, colors[2], atitle="")
+par(new=TRUE)
+
+print("Results for T1w+T2w features classifier:")
+p2BIRADS = calcAUC_plot(T2wrep_T1T2_wT2rep$obs, T2wrep_T1T2_wT2rep$C, 
+                           xptext=0.55, yptext=0.65, 2, colors[11], 
+                  atitle="Lesions with reported BIRADS T2wSI")
+legend("bottomright", 
+       legend = c(paste0("T1wonly"),
+                  paste0("T1w+T2w")),
+       col = c(colors[2],colors[11]), lty=c(1,2), lwd = 2)
+
+```
+
+
+**Significance t-test:**
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+# find significance
+roc.test(p1BIRADS$ROC, p2BIRADS$ROC, method=c("bootstrap"), alternative = c("less"), boot.stratified=TRUE)
+
+```
+
+**ROC for Lesions without reported BIRADS T2wSI:**
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE, fig.width=6, fig.height=6}
+
+par(mfrow=c(1,1))
+print("Results for T1w-only features classifier:")
+p1noBIRADS = calcAUC_plot(NoneT2w_imgT1_wT2rep$obs, NoneT2w_imgT1_wT2rep$C, 
+                           xptext=0.45, yptext=0.75 , 1, colors[2], atitle="")
+par(new=TRUE)
+
+print("Results for T1w+T2w features classifier:")
+p2noBIRADS = calcAUC_plot(NoneT2w_T1T2_wT2rep$obs, NoneT2w_T1T2_wT2rep$C, 
+                           xptext=0.55, yptext=0.65, 2, colors[11], 
+                  atitle="Lesions without reported BIRADS T2wSI")
+legend("bottomright", 
+       legend = c(paste0("T1wonly"),
+                  paste0("T1w+T2w")),
+       col = c(colors[2],colors[11]), lty=c(1,2), lwd = 2)
+
+```
+
+Significance t-test:
+```{r eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+# find significance
+roc.test(p1noBIRADS$ROC, p2noBIRADS$ROC, method=c("bootstrap"), alternative = c("less"), boot.stratified=TRUE)
+
+```
+
+## Experiment 3: Assessing contribution of T2w features to classification output 
+Since we are trying to measure the added effect of T2w-based features on solely T1w-based classification of lesions, is important to assess individual lesion contribution to a classification output.
+
+A surrogate for feature contribution to prediction output is **tree-based feature relevance**. 
+
+**tree-based feature relevance** can be measured using:
+
+  * Permutation based (z-scores) or 
+  
+  * decrease in Gini impurity criterion 
+
+Ensembles of trees are in general very randomized - when adding an extra feature to the pool, a tree will be build based on the maximum decrease in Gini available in the feature samples. By adding up the amount gini decreases for each individual variable over all trees in the ensemble and sorting those values, it's possible to identify the features that produced the highest decrease in Gini as **the most relevant features.**
+
+To factor out the randomization effect on selected features, the **most relevant features** can be identify as those features consistenly selected across multiple resamples of the data. This is possible using a resampling technique such as cross-validation. For example, a "very relevant" feature can be defined as a feature selected in more than 75% of the resampling folds, while a "moderately relevant" feature as a feature selected in 50-to-75% of the folds.
+ 
+
+### Confirming contribution of T2w features to classification output**
+```{r features, eval=TRUE, echo=FALSE, warning=FALSE, message=FALSE}
+load("Z:/Cristina/Section2/finalTreebased-boosting/Outputs/summaryResults.RData")
+
+print(maxFreq_dictT1w)
+
+ggplot(allT1wFfreq, aes(x=featureGroup, y=freq, fill=flagSel)) + 
+  geom_bar(stat = "identity") + coord_flip()   +
+  geom_text(aes(label = labels, y = pos), size = 3) +
+  scale_fill_discrete(guide = guide_legend(title = "cv Selection\nfrequency")) +
+  ggtitle("only T1w featsel") +
+  labs(y="# features selected", x=" ") 
+
+print(maxFreq_dictT1T2)
+
+ggplot(allT1T2wFfreq, aes(x=featureGroup, y=freq, fill=flagSel)) + 
+  geom_bar(stat = "identity") + coord_flip()   +
+  geom_text(aes(label = labels, y = pos), size = 3) +
+  scale_fill_discrete(guide = guide_legend(title = "cv Selection\nfrequency")) +
+  ggtitle("T1w +T2w featsel") +
+  labs(y="# features selected", x=" ") 
+
+```
+
+
+## Summary and Conclusions:
+
+* The inclusion of T2w features improved the CAD predictive performance. AUC increased from 0.82 to 0.85 when combining T1w and T2w features during classifier ensemble training, and t-test significance difference testing in ROC space confirmed that the difference was significant (p-value = 0.021)
+
+* When discriminating by wheather BIRADS T2wSI was reported or not by the radiologist, combining T1w and T2w features produce a significant increase in AUC only among lesions with reported BIRADS T2wSI:
+
+* **For Reported BIRADS T2wSI:** 
+  + T1w-only features classifier **AUC = 0.80, 95% CI [0.75-0.86]** vs. combined T1w and T2w features classifier **AUC = 0.84, 95% CI [0.79-0.88]**
+  + t-test significance testing (true difference in AUC is less than zero i.e the AUC of roc1 is smaller than the AUC of roc2.) **p-value = 0.04**
+  
+* **for Not reported BIRADS T2wSI:**
+  + T1w-only features classifier **AUC = 0.80, 95% CI [0.75-0.85]** vs. combined T1w and T2w features classifier **AUC = 0.81, 95% CI [0.76-0.86]**
+  + t-test significance testing (true difference in AUC is less than zero) **p-value = 0.23**
+
+
+* Including T2w features improved the AUC ROC performance for lesions without reported T2w BIRADS SI, but the increase was lower and not statistically significant than for lesions where the radiologist found T2w BIRADS SI relevant.
+
+* Tree-based feature relevance analysis confirmed that T2w features contributed to the predictive outcome of T1w+T2w combined classifiers. Out of the 44 T2w features available, 43 where selected during binary decision splits. 34 features where selected with in 75% or more of the resampling folds, and 9 features in 50-to-75% of the folds, indicating the consistent use of T2w features.
+
+
+
