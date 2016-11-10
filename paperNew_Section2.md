@@ -58,7 +58,7 @@ Compare differences in cross-validation and generalization performance among 4 t
 
 AUC measured in the Training set during grid parameter tunning. For each classifier, parameters are tunned acording to a grid search using the following algorithm:
 
-![](Z:/Cristina/Section2/papernew_notes/images/TrainAlgo.png)
+![](images/TrainAlgo.png)
 
 
 **Generalizaton AUC (test): **
@@ -100,7 +100,7 @@ cv AUC for all classifiers is comparable, but SVMs and ensembles of boosting cla
 
 The following algorithm is used to boost ensembles of classification trees:
 
-![](Z:/Cristina/Section2/papernew_notes/images/boosting.png)
+![](images/boosting.png)
 
 * Parameters such as **maximum depth** of binary decision trees, and the **number of boosting trees** in the ensemble can be tunned. The combination of parameters that produced the ensemble with lowest classification error was chosen as the final classifer, and its unbiased performance assessed in held-out cases using 10 folds of cv.
 
