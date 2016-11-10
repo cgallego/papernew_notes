@@ -10,9 +10,9 @@ output:
     toc: yes
 ---
 
-```{r set-options, echo=FALSE, cache=FALSE, message = FALSE, warning=FALSE}
+```{r set-options, verbose=TRUE, echo=FALSE, cache=FALSE, message = FALSE, warning=FALSE}
 knitr::opts_chunk$set(root.dir="Z:/Cristina/Section2/finalTreebased-boosting",
-                      echo = TRUE, verbose = FALSE, 
+                      echo = TRUE, verbose = TRUE, 
                       warning=FALSE, message=FALSE, comment="", tidy = TRUE)
 
 options(width = 100)
